@@ -306,7 +306,7 @@ python viz/agg_interior_folds.py --root viz_hidden
 
 ## (참고) Baseline "global 1회" 변형 — NA
 
-사수님 제안 검증용. anchor를 매 샘플마다 뽑지 않고 projection(Dφ)을 제거,
+추가 검증용. anchor를 매 샘플마다 뽑지 않고 projection(Dφ)을 제거,
 `base = λ0·L0 + λf·Lf`만으로 pool에서 top-Ka anchor를 **전체 1회** 골라 모든 샘플이 공유하는 변형.
 `attribution/pna.py`의 `select_global_neutral_anchors`와 `main_td.py`의 `--baseline na`로 구현.
 per-sample PNA와 CPD 비교용이며, Step 1에서 `--baseline na`로 바꾸면 `_na_lam10.0x10.0` 태그로 저장된다.
