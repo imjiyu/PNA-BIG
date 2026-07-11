@@ -1,7 +1,6 @@
 # PNA-BIG: Projected Neutral Anchor Baseline for BIG
 
 **Trend-Residual Path Decomposition with In-Manifold Neutral Anchor Baselines**
-Built on BIG / TIMING (Jang et al., 2025).
 
 ---
 
