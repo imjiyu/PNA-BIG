@@ -1,22 +1,72 @@
-# Bifurcated Integrated Gradients (BIG)
-**Trend-Residual Path Decomposition for Time Series Attribution**  
-KCC 2026 XAI Workshop  
-Jiyu Lim, Jisu Yeo, Haksoo Lim, Jaesik Choi (KAIST)
+# PNA-BIG: Projected Neutral Anchor Baseline for BIG
+
+**Trend-Residual Path Decomposition with In-Manifold Neutral Anchor Baselines**
+Built on BIG / TIMING (Jang et al., 2025).
 
 ---
 
 ## Overview
 
-BIG는 시계열 분류기의 attribution을 **trend / residual** 두 성분으로 분해한다.
-입력 `x`를 Kalman(RTS) smoother로 trend `T_x`와 residual `R_x = x − T_x`로 나눈 뒤,
-하나의 baseline→input 직선 경로가 아니라 **두 단계 경로 `c → T_x → x`** 를 따라 Integrated Gradients를 적분한다.
-IG의 path-additivity 덕분에 두 성분 기여도는 *근사 분해가 아니라* 정확한 분해가 된다:
+PNA-BIG는 BIG의 attribution 경로에서 **baseline 설계**를 개선한 확장이다.
+
+- **기존 BIG**: baseline `c = 0` (zero). zero 시퀀스는 데이터 manifold 밖이라, RNN/GRU의 hidden-state 경로가 학습 분포 밖(OOD)으로 벗어난다.
+- **PNA-BIG**: baseline을 zero 대신 **Projected Neutral Anchor(PNA)** — 각 입력 `x`에 대해 training pool에서 (1) representation space에서 가깝고 (2) input space에서 zero에 가까우며 (3) decision-neutral하고 (4) 실제 training sample인 anchor를 골라 baseline으로 사용한다.
+
+anchor 선택 목적함수:
 
 ```
-A_T + A_R = F(x) − F(c_M)
+c*(x) = argmin_c  Dφ(x,c) + λ0·L0(c) + λf·Lf(c)
+        Dφ : representation(hidden) 거리        (x 의존)
+        L0 : zero-proximity (input energy)
+        Lf : output neutrality (softmax ~ uniform)
 ```
 
-temporal context 유지를 위해 두 phase 모두 [TIMING (Jang et al., 2025)](https://arxiv.org/abs/2506.05035)의 random temporal segment mask를 공유한다. 본 코드는 TIMING 코드베이스를 확장한 것이다.
+baseline이 non-zero이므로 경로도 확장된다. 입력과 baseline을 **모두 trend/residual로 분해**하여 component-replacement path를 구성하고, trend-first / residual-first 두 순서를 평균한다:
+
+```
+trend-first :  Tc+Rc → Tx+Rc → Tx+Rx
+residual-first: Tc+Rc → Tc+Rx → Tx+Rx
+Ā_T = ½(A_T^∅ + A_T^R),   Ā_R = ½(A_R^∅ + A_R^T)
+```
+
+completeness는 zero가 아니라 선택된 neutral anchor 기준으로 성립한다:
+
+```
+Σ A_i(x) = F_y(x) − (1/Ka) Σ_c F_y(c)      (Top-Ka anchor 평균)
+```
+
+---
+
+## 이번 실험의 고정 설정
+
+| 항목 | 값 |
+| --- | --- |
+| baseline | `pna` (per-sample projection) — 기본 실험 |
+| λ0 × λf | **10.0 × 10.0** (고정) |
+| Ka (anchor 수) | 5 |
+| pool size | 1000 (train subsample, seed 고정) |
+| n_alphas (적분 스텝) | 50 / phase |
+| segment (num/min/max) | **50 / 1 / 48** (전 데이터셋 공통) |
+| datasets | epilepsy, wafer, PAM, boiler (**freezer 제외**) |
+| CV | 5-fold, seed 42, fold 평균 |
+| faithfulness masking | top 10% (`--topk 0.1 --top 0`, baseline `0.0`) |
+
+> **freezer는 이 연구에서 사용하지 않는다.** 스크립트/명령어에서 wafer와 혼동하지 말 것.
+> 주의: PNA-BIG는 order-averaged component-replacement path를 사용하며 TIMING의 random temporal mask를 쓰지 않는다. 따라서 --num_segments / --min_seg_len / --max_seg_len는 attribution 결과에 영향을 주지 않는 호환용 인자이며, 파일명의 seg50_min1_max48는 고정 태그일 뿐이다. (다음 rerun에서 SEG="kalman"으로 정리 예정)
+---
+
+## 변경/추가된 파일 (기존 BIG 대비)
+
+| 파일 | 상태 | 역할 |
+| --- | --- | --- |
+| `attribution/explainers_pna.py` | **신규 (explainers_td.py 대체)** | order-averaged PNA-BIG attribution. baseline도 trend/residual 분해 |
+| `attribution/pna.py` | **신규** | PNA anchor 선택 (`build_pna_cache`, `select_pna_baselines`) |
+| `real/main_td.py` | **수정** | `--baseline pna` 분기, anchor 캐싱·선택·Ka 평균, `_lam{λ0}x{λf}` 파일 태그 |
+| `eval_cpd_cpp.py` | 기존 | 저장된 npy로 CPD + faithfulness 재계산 |
+| `TR_table.py` | 기존 | Trend vs Residual dominance 집계표 |
+| `viz/viz_hidden_path.py` | **신규** | hidden-state trajectory 시각화 (OOD 완화 진단) |
+| `viz/agg_interior_folds.py` | **신규** | fold별 interior 거리 CSV 집계 |
+| `viz/run_viz.sh` | **신규** | 시각화 일괄 실행 (GPU 4개 병렬) |
 
 ---
 
@@ -27,245 +77,272 @@ pip install -r requirement.txt
 # 핵심: torch==1.13.1, pytorch-lightning==2.0.7, captum==0.6.0, pykalman, time_interpret(tint)
 ```
 
----
-
-## Repository Structure (핵심 스크립트)
-
-| 파일 | 역할 | 산출물 |
-|---|---|---|
-| `real/main_td.py` | BIG attribution 생성 (`--explainers our_td`) | `results_our/*.npy` |
-| `attribution/explainers_td.py` | BIG 핵심 구현 (Kalman 분해 + 2-phase IG) | — |
-| `run_td_all.sh` | 5 dataset × 5 fold 일괄 attribution 생성 | `results_our/*.npy` |
-| `check_completeness.py` | 경로 완전성 진단 | Table 2 |
-| `eval_cpd_cpp.py` | 저장된 npy로 CPD/AUCC + 5개 metric 재계산 | `*/full_eval.csv` |
-| `TR_table.py` | Trend vs Residual metric 집계 | Table 3 (metric) `results_table/*.csv` |
-| `TR100_compare.py` | `|T+R|` vs `|T|+|R|` 집계 | Table 4 |
-| `100_state_zero_baseline.py` | TIMING-100 baseline 집계 | Table 4·6 (TIMING 행) |
-| `positional_analysis.py` | fold별 positional 통계·그림 | Figure 2 (per-fold) |
-| `aggregate_positional_folds.py` | 5-fold positional 집계·플롯 | Figure 2 |
-| `viz_attr_mean_top3.py` | 채널별 mean signed attribution heatmap | Figure 3 |
-| `aggregate_heatmap_folds.py` | 5-fold total/dominance heatmap (보조) | 탐색용 |
-| `real/main_td_viz.py` | per-sample 2-phase path 시각화 | Figure 4 (Appendix) |
+사전 조건: `model/{data}/state_classifier_{fold}_42_no_imputation` 체크포인트가 있어야 한다
+(BIG과 동일한 GRU 분류기; 없으면 기존 학습 절차로 먼저 생성).
 
 ---
 
-## Output Directory Convention
+## 실행 전 주의사항
 
-> **모든 메인(=Kalman smoother) 결과는 단일 폴더 `results_our/`로 통일되어 있다.**
-> 평가 스크립트 기본값이 전부 `results_our`를 가리키므로, 메인 재현은 별도 경로 지정 없이 동작한다.
-
-| 폴더 | 용도 | 비고 |
-|---|---|---|
-| `results_our/` | 메인(smoother) attribution npy + eval csv | `main_td.py` 기본 저장 위치 |
-| `results_filter/` | Kalman **filter** ablation (Table 5) | 수동 전환 필요 (아래 ⚠️A) |
-| `results_comp/` | completeness 진단 (global norm, Table 2) | 수동 전환 필요 (아래 ⚠️B) |
-| `results_table/` | 집계표 csv (Table 3·4) | `TR_*` / `TR100_compare` 출력 |
-| `figs_positional/` | positional 그림·csv (Figure 2·보조 heatmap) | — |
+- **A. append 모드 CSV**: `eval_cpd_cpp.py`는 같은 `--output_file`에 행을 누적한다. 재실행 전 반드시 기존 csv를 삭제하거나(`rm -f`), fold별 다른 파일에 쓴 뒤 병합한다. 안 지우면 fold 중복 집계.
+- **B. `--methods` 키는 npy 파일명과 정확히 일치**해야 한다. PNA 결과는 파일명에 `_lam10.0x10.0` 태그가 붙는다. 형식:
+  `timing_td_{kind}_kalman_seg50_min1_max48_lam10.0x10.0`
+  (`kind` ∈ `trend`, `residual`, `combined`, `T_plus_R`). 안 맞으면 `FileNotFoundError`.
+- **C. `--train` 플래그는 절대 붙이지 않는다.** load 모드는 플래그를 생략해야 한다 (`bool("False") == True` 파이썬 버그로 `--train False`는 학습을 실행해버림).
+- **D. 저장 위치**: PNA 결과는 `results_pna/`에 저장된다.
+- **E. GPU 할당**: 모든 스크립트의 `CUDA_VISIBLE_DEVICES`는 실행 환경(GPU 개수)에 맞게 조정.
 
 ---
 
-## ⚠️ 공통 주의사항 (실행 전 반드시 확인)
+## 전체 파이프라인 (한눈에)
 
-**A. `main_td.py` 저장 폴더는 실험 종류에 따라 수동 전환한다.**
-`real/main_td.py` 하단(약 1154줄)에 저장 경로가 하드코딩되어 있다. 주석에 표기된 규칙:
-`results_our` = Kalman smoother(메인) / `results_filter` = Kalman filter(Table 5) / `results_comp` = completeness(Table 2).
-**메인 재현만 할 경우 이 줄은 손대지 않는다.** filter·completeness 실험을 할 때만 이 경로를 바꾼다.
-
-**B. completeness(Table 2)는 normalization을 바꿔야 한다.**
-메인 평가는 **per-position normalization**을 쓰지만, completeness ratio 계산에는 **global normalization**이 필요하다.
-`attribution/explainers_td.py`의 `_ig_phase`에서:
-- 활성화: `attr = attr_sum / n_alphas` / `attr = attr.mean(dim=0)` (현재 주석 상태인 97–98줄)
-- 주석 처리: `N_free = ...` 3줄 (현재 활성 상태인 100–102줄)
-그리고 `main_td.py` 저장 경로를 `results_comp/`로 바꾼 뒤 attribution을 재생성한다. **메인 평가로 돌아갈 땐 반드시 원복**한다.
-
-**C. `eval_cpd_cpp.py`는 append 모드로 csv를 쓴다.**
-같은 `--output_file`에 행을 *누적*하므로, 새로 돌리기 전 기존 csv를 삭제한다 (`rm -f results_our/full_eval.csv`). 안 지우면 fold가 중복 집계된다.
-
-**D. `--methods` 키는 npy 파일명과 정확히 일치해야 한다.**
-키 형식: `timing_td_{kind}_kalman_seg{N}_min{m}_max{M}` (`kind` ∈ `trend`, `residual`, `combined`, `T_plus_R`).
-seg/min/max는 **데이터셋마다 다르다**(아래 표). 안 맞으면 `FileNotFoundError`.
-
-**E. 모든 실험은 5-fold CV, `seed=42` 고정**이며 결과는 fold 평균이다.
-`run_td_all.sh`의 GPU 할당(`CUDA_VISIBLE_DEVICES`)은 실행 환경에 맞게 조정한다.
-
-**데이터셋별 segment 설정 (모든 실험 공통):**
-
-| dataset | num_segments | min_seg_len | max_seg_len | (testbs: GPU에 따라 조정 가능) |
-|---|---|---|---|---|
-| epilepsy | 10 | 10 | 10 | 5 |
-| freezer | 5 | 10 | 100 | 5 |
-| boiler | 50 | 1 | 36 | 30 |
-| wafer | 5 | 10 | 152 | 10 |
-| PAM | 10 | 10 | 600 | 3 |
-
-(`testbs`는 GPU 메모리에 맞춘 배치 크기일 뿐 결과 수치에 영향 없음.)
-
-**F. 모든 faithfulness 평가는 10% masking 기준이다: `area(topk) 0.1` + `top 0` + baseline `0.0` (전 실험 공통).**
-`cumulative_difference`는 `top != 0`이면 area 비율을 **무시하고 고정 `top` 개수**로 마스킹한다.
-- `eval_cpd_cpp.py` 는 기본값이 `top=0`, `topk=0.1` 이라 별도 지정 없이 10% 비율 마스킹으로 동작한다 (정식 재현 경로).
-- 반면 TIMING 원본 코드의 `main_preserve*`·`main.py` 는 `--top` 기본값이 **50**이므로, 10% 비율 마스킹을 쓰려면 반드시 **`--top 0`** 을 명시해야 한다. (안 주면 area 0.1이 무시되고 고정 50칸만 마스킹)
-
----
-
-## Reproduction
-
-### Step 1 — Attribution 생성 (모든 Table·Figure의 선행 단계)
-
-`main_td.py`가 trend/residual/combined/signed 6종 npy를 `results_our/`에 저장한다.
-
-```bash
-bash run_td_all.sh        # 5 dataset × 5 fold → results_our/
+```
+Step 1. attribution 생성      : run_pna_all.sh          → results_pna/*.npy
+Step 2. CPD/faithfulness 평가 : run_pna_eval.sh         → 표 2종 CSV
+Step 3. OOD 시각화            : viz/run_viz.sh           → viz_hidden/ 그림·CSV
 ```
 
-> 저장 키: `{data}_state_timing_td_{kind}_kalman_seg{N}_min{m}_max{M}_result_{fold}_42.npy`
-> `kind` ∈ `trend`(|T|), `residual`(|R|), `trend_signed`(T), `residual_signed`(R), `combined`(|T+R|), `T_plus_R`(|T|+|R|)
+**가장 빠른 재현: 아래 세 스크립트를 순서대로 실행하면 끝난다.**
+
+```bash
+bash run_pna_all.sh     # (1) attribution — 4 dataset × 5 fold
+bash run_pna_eval.sh    # (2) 평가 — |T+R| vs |T|+|R| + Trend vs Residual
+bash viz/run_viz.sh     # (3) 시각화 — hidden trajectory OOD 진단
+```
+
+각 단계 세부는 아래.
 
 ---
 
-### Table 2 — Path Completeness Diagnostic
+## Step 1 — Attribution 생성
 
-> ⚠️ 먼저 **공통 주의사항 B**(global normalization 전환 + `main_td.py` 저장 경로 `results_comp/`)를 적용하고 Step 1을 재실행해 `results_comp/`에 npy를 만든다.
+`real/main_td.py`가 `--baseline pna`로 PNA-BIG attribution 6종 npy를 `results_pna/`에 저장한다.
 
-```bash
-python check_completeness.py \
-  --model state --seed 42 --folds 0 1 2 3 4 \
-  --results-dir ./results_comp \
-  > completeness_check.txt
-```
+**저장 키**:
+`{data}_state_timing_td_{kind}_kalman_seg50_min1_max48_lam10.0x10.0_result_{fold}_42.npy`
+`kind` ∈ `trend`(|T|), `residual`(|R|), `trend_signed`(T), `residual_signed`(R), `combined`(|T+R|), `T_plus_R`(|T|+|R|)
+추가로 `timing_td_fxc_...` (completeness 검증용 F(x)−mean F(c)).
 
-`completeness_check.txt`에서 `all_med`가 1.0에 가깝고 `norm_err`가 0에 가까우면 정상.
-**진단이 끝나면 explainers_td.py normalization과 main_td.py 경로를 메인(per-position, results_our)으로 원복한다.**
-
----
-
-### Table 3 — Component Comparison (Trend vs Residual)
-
-`|T|`, `|R|` npy를 평가해 `results_our/full_eval.csv`에 모은 뒤 집계한다.
+### 일괄 실행 스크립트: `run_pna_all.sh`
 
 ```bash
-rm -f results_our/full_eval.csv      # ⚠️ append 모드 — 재실행 전 삭제
+#!/usr/bin/env bash
+set -u
+mkdir -p logs/pna_lam10 results_pna
 
-# 데이터셋별 (seg 값은 위 표 참고). fold 0–4 반복.
-for f in 0 1 2 3 4; do
-  python eval_cpd_cpp.py --data epilepsy --fold $f --device cuda:0 \
-    --methods timing_td_trend_kalman_seg10_min10_max10 \
-              timing_td_residual_kalman_seg10_min10_max10
-done
-# freezer  : ..._kalman_seg5_min10_max100
-# boiler   : ..._kalman_seg50_min1_max36
-# wafer    : ..._kalman_seg5_min10_max152
-# PAM      : ..._kalman_seg10_min10_max600
-```
-
-집계:
-
-```bash
-python TR_table.py          # Table 3 생성 및 results_table 폴더 저장
-```
-
-> 참고: `eval_cpd_cpp.py`는 현재 CPD만 출력한다(코드 내 CPP 루프 주석 처리됨). `TR_all.py`의 CPP 컬럼은 비어 나오므로 무시.
-
----
-
-### Tables 4 & 6 — Aggregation (|T+R| vs |T|+|R| vs TIMING)
-
-같은 `eval_cpd_cpp.py`로 `combined`(=|T+R|), `T_plus_R`(=|T|+|R|)를 평가하고, fold csv를 합쳐 `results_our/abs_full_eval_{ds}.csv`를 만든다.
-
-```bash
-# 예: PAM (다른 데이터셋은 seg 값만 교체)
-mkdir -p results_our/tmp_PAM
-for f in 0 1 2 3 4; do
-  python eval_cpd_cpp.py --data PAM --fold $f --device cuda:0 \
-    --output_file results_our/tmp_PAM/PAM_fold${f}.csv \
-    --methods timing_td_combined_kalman_seg10_min10_max600 \
-              timing_td_T_plus_R_kalman_seg10_min10_max600
-done
-awk 'FNR==1 && NR!=1 {next} {print}' results_our/tmp_PAM/PAM_fold*.csv \
-  > results_our/abs_full_eval_PAM.csv
-
-python TR100_compare.py        # → results_table/result_compare.csv
-```
-
-TIMING baseline 및 7개 XAI baseline(AFO/GateMask/GradSHAP/TimeX/TimeX++/IG/TIMING) 수치는 TIMING 원본 평가 파이프라인 산출물을 사용한다. Zero baseline 집계는:
-
-```bash
-python 100_state_zero_baseline.py \
-  --input_dir ./100_state/100_state --out_dir ./baseline_zero_summary
-```
-
----
-
-### Table 5 — Ablation: Kalman Filter (causal)
-
-> ⚠️ `main_td.py`의 explainer import를 **filter 변형**으로 바꾸고, 저장 경로를 `results_filter/`로 바꾼다(공통 주의사항 A).
-> 그 뒤 Step 1 → Table 3 → Table 4 절차를 `--npy_dir results_filter`로 동일 반복한다. (실험 후 원복.)
-
----
-
-### Figure 2 — Positional |A_T| vs |A_R|
-
-fold별 통계 생성 → 5-fold 집계 플롯. `--paper_style` 플래그를 켠다.
-
-```bash
-declare -A NSEG=([boiler]=50 [PAM]=10 [freezer]=5 [epilepsy]=10 [wafer]=5)
-declare -A MINL=([boiler]=1  [PAM]=10 [freezer]=10 [epilepsy]=10 [wafer]=10)
-declare -A MAXL=([boiler]=36 [PAM]=600 [freezer]=100 [epilepsy]=10 [wafer]=152)
-
-for data in boiler PAM freezer epilepsy wafer; do
-  for fold in 0 1 2 3 4; do
-    python positional_analysis.py --data $data --fold $fold --model_type state --seed 42 \
-      --num_segments ${NSEG[$data]} --min_seg_len ${MINL[$data]} --max_seg_len ${MAXL[$data]} \
-      --agg mean --band sem --paper_style
+idx=0; pids=(); names=(); failed=0
+wait_batch() {
+  for i in "${!pids[@]}"; do
+    if wait "${pids[$i]}"; then echo "[OK] ${names[$i]}"
+    else echo "[FAIL] ${names[$i]} — check log"; failed=$((failed+1)); fi
   done
-  python aggregate_positional_folds.py --data $data --model_type state --seed 42 --folds 0,1,2,3,4
+  pids=(); names=()
+}
+
+for data in epilepsy wafer PAM boiler; do
+  for fold in 0 1 2 3 4; do
+    gpu=$((idx % 4))                       # GPU 개수에 맞게 조정
+    name="${data}_f${fold}"
+    echo "[START] gpu=${gpu} ${name}"
+    CUDA_VISIBLE_DEVICES=${gpu} \
+      python real/main_td.py \
+        --explainers our_td \
+        --data "${data}" --fold "${fold}" --seed 42 \
+        --baseline pna --model_type state --eval_split test \
+        --pna_lam0 10.0 --pna_lamf 10.0 --pna_ka 5 \
+        --num_segments 50 --min_seg_len 1 --max_seg_len 48 \
+        --device cuda:0 --testbs 200 \
+        > "logs/pna_lam10/${name}.log" 2>&1 &
+    pids+=("$!"); names+=("${name}"); idx=$((idx+1))
+    if (( ${#pids[@]} == 4 )); then wait_batch; fi   # GPU 개수만큼 배치
+  done
 done
+(( ${#pids[@]} > 0 )) && wait_batch
+echo "[DONE] attribution 생성 완료, 실패=${failed}"
 ```
 
-(선택) 5-fold total/dominance heatmap — 논문 그림은 아니며 탐색용:
+```bash
+bash run_pna_all.sh
+```
+
+### (선택) Completeness 빠른 확인
+
+수식이 잘 닫히는지 `fxc`로 검증할 수 있다 (median CR ≈ 1, norm error ≈ 0이면 정상).
+이번 실험 기준 median CR 1.006 / mean 0.9996으로 확인됨.
+
+---
+
+## Step 2 — CPD / Faithfulness 평가
+
+두 종류 표를 만든다:
+1. **Aggregation 표** — `|T+R|` vs `|T|+|R|` (combined vs T_plus_R)
+2. **Dominance 표** — Trend vs Residual (`trend` vs `residual`, `TR_table.py`)
+
+### 일괄 실행 스크립트: `run_pna_eval.sh`
 
 ```bash
-for data in boiler PAM freezer epilepsy wafer; do
-  python aggregate_heatmap_folds.py --data $data --model_type state --seed 42 --folds 0,1,2,3,4 \
-    --num_segments ${NSEG[$data]} --min_seg_len ${MINL[$data]} --max_seg_len ${MAXL[$data]}
-done
+#!/usr/bin/env bash
+set -u
+SEG="kalman_seg50_min1_max48"
+LAM="_lam10.0x10.0"
+ROOT="results_pna"
+mkdir -p ${ROOT}/eval_combined ${ROOT}/eval_dominance logs/pna_eval
+
+# --- 재실행 대비: 이전 결과 삭제 (주의사항 A) ---
+rm -f ${ROOT}/eval_combined/*.csv ${ROOT}/eval_dominance/*.csv
+
+idx=0
+run_eval() {   # $1=subdir $2=prefix  $3,$4=methods
+  local sub="$1" pref="$2" m1="$3" m2="$4"
+  for data in epilepsy wafer PAM boiler; do
+    for fold in 0 1 2 3 4; do
+      gpu=$((idx % 4))
+      CUDA_VISIBLE_DEVICES=$gpu nohup python eval_cpd_cpp.py \
+        --data "$data" --fold "$fold" --device cuda:0 \
+        --npy_dir ${ROOT} \
+        --output_file "${ROOT}/${sub}/${pref}_${data}_f${fold}.csv" \
+        --methods "${m1}" "${m2}" \
+        > "logs/pna_eval/${pref}_${data}_f${fold}.log" 2>&1 &
+      idx=$((idx+1)); (( idx % 4 == 0 )) && wait
+    done
+  done
+  wait
+}
+
+# (1) Aggregation: |T+R| vs |T|+|R|
+run_eval eval_combined combined \
+  "timing_td_combined_${SEG}${LAM}" \
+  "timing_td_T_plus_R_${SEG}${LAM}"
+
+# (2) Dominance: Trend vs Residual
+run_eval eval_dominance full \
+  "timing_td_trend_${SEG}${LAM}" \
+  "timing_td_residual_${SEG}${LAM}"
+
+# --- fold별 CSV 병합 ---
+awk 'FNR==1 && NR!=1 {next} {print}' ${ROOT}/eval_combined/combined_*.csv \
+  > ${ROOT}/eval_combined/combined_eval.csv
+awk 'FNR==1 && NR!=1 {next} {print}' ${ROOT}/eval_dominance/full_*.csv \
+  > ${ROOT}/eval_dominance/full_eval.csv
+echo "[DONE] 평가 CSV 병합 완료"
+```
+
+```bash
+bash run_pna_eval.sh
+```
+
+### 표 조립
+
+**① Aggregation 표 (|T+R| vs |T|+|R|)** — CPD 평균±표준편차:
+
+```bash
+python - <<'PY'
+import pandas as pd
+df = pd.read_csv("results_pna/eval_combined/combined_eval.csv")
+mmap = {
+  "timing_td_combined_kalman_seg50_min1_max48_lam10.0x10.0": "|T + R|",
+  "timing_td_T_plus_R_kalman_seg50_min1_max48_lam10.0x10.0": "|T| + |R|",
+}
+df = df[df["metric"] == "CPD"].copy()
+df["Method"] = df["method"].map(mmap)
+df = df.dropna(subset=["Method"])
+s = df.groupby(["Method","data"])["cum_diff"].agg(["mean","std"]).reset_index()
+s["value"] = s.apply(lambda r: f'{r["mean"]:.3f} ± {r["std"]:.3f}', axis=1)
+t = s.pivot(index="Method", columns="data", values="value")
+t = t.reindex(index=["|T + R|","|T| + |R|"],
+              columns=["boiler","PAM","epilepsy","wafer"])
+print(t.to_string())
+t.to_csv("results_pna/eval_combined/cpd_mean_std.csv")
+print("\nsaved: results_pna/eval_combined/cpd_mean_std.csv")
+PY
+```
+
+**② Dominance 표 (Trend vs Residual)**:
+
+```bash
+python TR_table.py \
+  --results_dir results_pna \
+  --eval_csv results_pna/eval_dominance/full_eval.csv \
+  --out_dir results_pna/eval_dominance \
+  --folds 0 1 2 3 4
+```
+
+> `eval_cpd_cpp.py`는 현재 CPD만 출력한다(CPP 루프 주석 처리). 다른 faithfulness 컬럼(comp/ce/log-odds/suff/acc)은 함께 계산되어 CSV에 저장된다.
+
+---
+
+## Step 3 — OOD 완화 시각화 (hidden trajectory)
+
+baseline→input 경로를 따라 GRU hidden state를 뽑아, per-dim 표준화(z-score) hidden 공간에서 **training pool까지의 k-NN 거리**로 "경로가 학습 manifold 안에 머무는 정도"를 측정한다. zero vs PNA 비교.
+
+- endpoint(baseline·input)는 제외하고 **interior(0<α<1)** 거리로 OOD 완화를 판단한다 (PNA anchor는 training sample이라 시작점 in-manifold는 자명).
+- line(직선 c→x) / trend-first / residual-first 세 경로 모두 정량화.
+- fold 0: 대표 그림 3장(무작위 샘플) + summary, fold 1~4: summary만.
+
+### 일괄 실행: `viz/run_viz.sh`
+
+```bash
+bash viz/run_viz.sh
+# 완료 후 5-fold 집계:
+python viz/agg_interior_folds.py --root viz_hidden
+```
+
+> `viz/run_viz.sh`는 데이터셋 하나당 GPU 하나(0~3)를 배정해 4개를 병렬로 돌린다.
+> 각 fold는 `viz_hidden/{data}/{data}_fold{F}_lam10.0x10.0_ka5_k5_a50_interior_summary.csv`를 남기고,
+> `agg_interior_folds.py`가 이를 모아 **fold-평균 ± fold-표준편차 + PNA<zero 비율(%)**을 출력한다.
+> 결과 해석: `PNA<zero %`가 높을수록(→100%) 해당 데이터셋에서 OOD 완화가 강함.
+
+**tmux로 백그라운드 실행 (권장):**
+
+```bash
+tmux new -s viz
+bash viz/run_viz.sh
+# Ctrl+b, d 로 detach
+# 나중에:  tmux attach -t viz
+python viz/agg_interior_folds.py --root viz_hidden
 ```
 
 ---
 
-### Figure 3 — Channel-wise Mean Signed Attribution Heatmap
+## (참고) Baseline "global 1회" 변형 — NA
+
+사수님 제안 검증용. anchor를 매 샘플마다 뽑지 않고 projection(Dφ)을 제거,
+`base = λ0·L0 + λf·Lf`만으로 pool에서 top-Ka anchor를 **전체 1회** 골라 모든 샘플이 공유하는 변형.
+`attribution/pna.py`의 `select_global_neutral_anchors`와 `main_td.py`의 `--baseline na`로 구현.
+per-sample PNA와 CPD 비교용이며, Step 1에서 `--baseline na`로 바꾸면 `_na_lam10.0x10.0` 태그로 저장된다.
 
 ```bash
-python viz_attr_mean_top3.py --data all                    # 상위 3채널 (Boiler 등 멀티변량 — Fig 3)
-python viz_attr_mean_top3.py --data all --topk_channels 0  # 전채널 평균 (univariate는 동일 결과)
+# 예: NA 변형 attribution
+python real/main_td.py --explainers our_td \
+  --data epilepsy --fold 0 --seed 42 \
+  --baseline na --model_type state \
+  --pna_lam0 10.0 --pna_lamf 10.0 --pna_ka 5 \
+  --num_segments 50 --min_seg_len 1 --max_seg_len 48 \
+  --device cuda:0 --testbs 200
+# 평가 시 --methods 태그를 _na_lam10.0x10.0 로 교체
 ```
 
 ---
 
-### Figure 4 (Appendix) — Two-Phase Attribution Path (per-sample)
+## 결과 요약 (λ=10×10, 5-fold 평균)
 
-```bash
-# 예: boiler (다른 데이터셋은 seg/채널만 교체)
-python real/main_td_viz.py --explainers our_td --data boiler --fold 0 --testbs 50 \
-  --num_segments 50 --min_seg_len 1 --max_seg_len 36 \
-  --viz --viz_dir ./viz_td/boiler --viz_n_samples 5 --viz_channels 6 --device cuda:0
-```
+**CPD (|T+R|)** — per-sample PNA:
 
-| dataset | num/min/max | viz_channel number |
-|---|---|---|
-| boiler | 50/1/36 | 6 |
-| wafer | 5/10/152 | 0 |
-| PAM | 10/10/600 | 9 |
-| epilepsy | 10/10/10 | 0 |
-| freezer | 5/10/100 | 0 |
+| Method | boiler | PAM | epilepsy | wafer |
+| --- | --- | --- | --- | --- |
+| \|T + R\| | 1.311 ± 0.408 | 0.401 ± 0.032 | 0.050 ± 0.010 | 0.154 ± 0.058 |
+| \|T\| + \|R\| | 1.350 ± 0.472 | 0.366 ± 0.025 | 0.050 ± 0.009 | 0.183 ± 0.064 |
 
----
+**OOD 완화 (interior k-NN dist, PNA<zero 비율)**:
 
-## 원본 TIMING 호환 평가 스크립트 (참고)
+| dataset | line | tf | rf | 판정 |
+| --- | --- | --- | --- | --- |
+| boiler | 100% | 100% | 100% | 완화 명확 |
+| wafer | 67.6% | 38.0% | 65.0% | 대체로 완화 |
+| PAM | 46.8% | 35.8% | 66.8% | 혼재 |
+| epilepsy | 0.0% | 0.2% | 0.0% | 역전 |
 
-`real/main_preserve.py`는 TIMING 원본에서 이어받은 평가 스크립트로,
-`results_our/`의 npy를 읽어 Table 3 / Table 4 수치를 한 번에 산출하는 **대체 경로**다.
-본 repo의 정식 재현 경로는 위 `eval_cpd_cpp.py` 체인이며, 이 스크립트는 호환성을 위해 보존만 한다.
-(`pred_diff`를 `results_TRC/`·`results_pred/`에 저장하므로, 직접 실행하려면 해당 폴더를 미리 생성해야 한다.)
+→ OOD 완화 효과는 데이터셋(hidden manifold 구조)에 의존적.
 
 ---
 
