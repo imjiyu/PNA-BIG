@@ -346,4 +346,3 @@ python real/main_td.py --explainers our_td \
 
 ---
 
-Built on TIMING (Jang, Kim, Yang, 2025): https://arxiv.org/abs/2506.05035
