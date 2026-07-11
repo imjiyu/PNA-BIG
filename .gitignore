@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Training logs
+lightning_logs/
+logs/
+logs_td/
+*.log
+nohup.out
+
+# Experimental outputs
+results_*/
+viz_hidden_*/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+data/PAM/processed_data/PTdict_list.npy
