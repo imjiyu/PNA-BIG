@@ -542,7 +542,7 @@ def main(
                     x_batch,
                     baselines=(th.cat([x_batch * 0, x_batch])),
                     target=partial_targets,
-                    n_samples=50,
+                    n_samples=100, # step수 100으로 맞춤
                     stdevs=0.0001,
                     additional_forward_args=(data_mask, timesteps, False),
                 ).abs()
@@ -650,6 +650,7 @@ def main(
                 x_batch,
                 baselines=x_batch * 0,
                 target=partial_targets,
+                n_steps=100,   # step수 100으로 맞춤
                 additional_forward_args=(data_mask, timesteps, False),
                 # temporal_additional_forward_args=temporal_additional_forward_args,
                 # task="binary",
@@ -791,7 +792,7 @@ def main(
                 baselines=x_batch * 0,
                 targets=partial_targets,
                 additional_forward_args=(data_mask, timesteps, False),
-                n_samples=50,
+                n_samples=100, # step수 100으로 맞춤
                 num_segments=num_segments,
                 min_seg_len=min_seg_len,
                 max_seg_len=max_seg_len,
