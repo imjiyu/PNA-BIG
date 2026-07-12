@@ -100,3 +100,22 @@ def select_global_neutral_anchors(cache, Ka=5):
     Ka = max(1, min(Ka, cache["pool"].shape[0]))
     idx = torch.topk(-base, Ka, dim=0).indices  # 가장 neutral+low-energy
     return cache["pool"][idx].contiguous()      # [Ka, T, D]
+
+
+# select_pna_baselines 와 '수학적으로 동일'하며, 최종 pool[idx] 대신 idx 만 반환함
+# (anchors = pool[idx] 이므로 재현·검증·저장에 idx 만 있으면 충분)
+@torch.no_grad()
+def select_pna_indices(inputs, cache, classifier, Ka=1, chunk=256):
+    """
+    select_pna_baselines 와 동일한 J 계산 후, pool-relative anchor 인덱스 [B, Ka] 반환.
+    저장/검증용: anchors = cache["pool"][idx] 로 언제든 복원 가능 (RNG 의존 0).
+    """
+    inputs = inputs.to(device=cache["device"], dtype=cache["dtype"]); B = inputs.shape[0]
+    phi_x = _extract(classifier, inputs, cache["feature"], chunk).reshape(B, -1)
+    phi_x = (phi_x - cache["mu"]) / cache["sd"]
+    phi_c = cache["phi_c"]
+    Dphi = (phi_x.pow(2).sum(1, keepdim=True) - 2 * phi_x @ phi_c.t()
+            + phi_c.pow(2).sum(1)[None, :]) / cache["m"]
+    J = Dphi + cache["base"][None, :]
+    Ka = max(1, min(Ka, cache["pool"].shape[0]))
+    return torch.topk(-J, Ka, dim=1).indices  # [B, Ka]
