@@ -872,6 +872,25 @@ def main(
             pool = x_train[idx]
             pna_cache = build_pna_cache(pool, classifier, feature=pna_feature,
                                         lam0=pna_lam0, lamf=pna_lamf)
+            
+            # --- (opt-in) 생성 시점 anchor 저장: 재현 증명용. SAVE_ANCHOR_IDX=1 일 때만 ---
+            if baseline == "pna" and os.environ.get("SAVE_ANCHOR_IDX") == "1":
+                from attribution.pna import select_pna_indices
+                _idx_all = []
+                for _b in test_loader:                     # attribution 과 '동일 순서'
+                    _xb = _b[0].to(device)
+                    _idx_all.append(
+                        select_pna_indices(_xb, pna_cache, classifier, Ka=pna_ka).cpu()
+                    )
+                _anchor_idx = th.cat(_idx_all, 0)          # [N, Ka]
+                _pool_p = f"./results_pna/{data}_{model_type}_pool_{fold}_{seed}.npy"
+                _idx_p  = (f"./results_pna/{data}_{model_type}_anchoridx_"
+                           f"lam{pna_lam0}x{pna_lamf}_{fold}_{seed}.npy")
+                np.save(_pool_p, pool.detach().cpu().numpy())
+                np.save(_idx_p, _anchor_idx.numpy())
+                print(f"[SAVE_ANCHOR_IDX] saved {_pool_p} , {_idx_p} "
+                      f"idx{tuple(_anchor_idx.shape)}")
+            
             if baseline == "na":
                 # 전체 실행 1회: global fixed anchor [Ka, T, D]
                 global_anchors = select_global_neutral_anchors(pna_cache, Ka=pna_ka)
