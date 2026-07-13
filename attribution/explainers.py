@@ -322,6 +322,108 @@ class OUR:
             
         return final_attr
     
+
+    def attribute_random_time_segments_completeness(
+        self,
+        inputs: torch.Tensor,      # [B, T, D]
+        baselines: torch.Tensor,   # [B, T, D]
+        targets: torch.Tensor,     # [B]
+        additional_forward_args,
+        n_samples: int = 100,      # step 수 (원 TIMING처럼 mask+alpha fused). 논문 TIMING=100 step
+        num_segments: int = 3,
+        max_seg_len: int = None,
+        min_seg_len: int = None,
+    ):
+        """
+        TIMING-global (completeness form). Fused expectation 방식:
+        α 적분점마다 마스크를 새로 뽑아 sum이 F(x)-E_M[F(cM)]로 '기댓값에서' 닫힌다.
+        (per-mask보다 K배 저렴; 마스크별 정확 닫힘은 각주 처리)
+
+        원 attribute_random_time_segments_one_dim_same_for_batch 대비 3가지 차이:
+          (1) 정규화 GLOBAL(÷ n_samples)  → completeness 추정량 (원본 N_free는 미보장)
+          (2) 같은 마스크로 fxc = F(x) - E_M[F(cM)] 함께 반환
+          (3) 원본 마스킹의 두 버그 수정:
+              - indices*valid_indices 가 padding을 index 0으로 보내 t=0을 과잉 마스킹하던 문제
+                → one-hot 세그먼트 마스크로 대체 (t=0 오염 제거)
+              - t_start 범위 (T - seg_lens) → (T - seg_lens + 1) 로 마지막 시작점 포함
+
+        반환:
+            attr_signed : [B, T, D] signed, global-normalized  → sum이 completeness 대상
+            fxc         : [B]       F_y(x) - E_M[F_y(cM)]       → 완전성 분모
+        """
+        if inputs.shape != baselines.shape:
+            raise ValueError("Inputs and baselines must have the same shape.")
+
+        B, T, D = inputs.shape
+        device = inputs.device
+        return_all = additional_forward_args[2]
+
+        if max_seg_len is None:
+            max_seg_len = T
+        if min_seg_len is None:
+            min_seg_len = 1
+
+        alphas = torch.linspace(0, 1 - 1 / n_samples, n_samples, device=device).view(-1, 1, 1, 1)
+
+        expanded_inputs = inputs.unsqueeze(0)
+        expanded_baselines = baselines.unsqueeze(0)
+        interpolated_inputs = expanded_baselines + alphas * (expanded_inputs - expanded_baselines)
+
+        # ---- 세그먼트 마스크 (버그 수정판) ----
+        dims = torch.randint(0, D, (n_samples, B, num_segments), device=device)
+        seg_lens = torch.randint(min_seg_len, max_seg_len + 1, (n_samples, B, num_segments), device=device)
+        # FIX2: 마지막 시작점 포함 위해 (T - seg_lens + 1)
+        t_starts = (torch.rand(n_samples, B, num_segments, device=device) * (T - seg_lens + 1)).long()
+
+        time_mask = torch.ones_like(interpolated_inputs)                       # [n,B,T,D]
+        t_ar = torch.arange(T, device=device).view(1, 1, T)                    # [1,1,T]
+        for s in range(num_segments):
+            start = t_starts[:, :, s].unsqueeze(-1)                            # [n,B,1]
+            end = start + seg_lens[:, :, s].unsqueeze(-1)                      # [n,B,1]
+            in_seg = (t_ar >= start) & (t_ar < end)                           # [n,B,T]  bool
+            # FIX1: one-hot 으로 정확히 (선택 dim, in_seg timestep)만 0 → t=0 오염 없음
+            d_onehot = torch.nn.functional.one_hot(dims[:, :, s], num_classes=D).bool()  # [n,B,D]
+            seg_mask = in_seg.unsqueeze(-1) & d_onehot.unsqueeze(2)           # [n,B,T,D]
+            time_mask = time_mask.masked_fill(seg_mask, 0.0)
+
+        fixed_inputs = expanded_inputs.detach()
+        masked_inputs = time_mask * interpolated_inputs + (1 - time_mask) * fixed_inputs
+        masked_inputs.requires_grad = True
+
+        predictions = self.model(
+            masked_inputs.view(-1, T, D), mask=None, timesteps=None, return_all=return_all,
+        )
+        if predictions.dim() == 1:
+            predictions = predictions.unsqueeze(-1)
+        predictions = predictions.view(n_samples, B, -1)
+        gathered = predictions.gather(
+            dim=2, index=targets.unsqueeze(0).unsqueeze(-1).expand(n_samples, B, 1)
+        ).squeeze(-1)
+
+        grad = torch.autograd.grad(gathered.sum(), masked_inputs, retain_graph=False)[0]
+        grad[time_mask == 0] = 0
+        grads = grad.sum(dim=0)
+        attr_signed = grads * (inputs - baselines) / float(n_samples)          # GLOBAL 정규화
+
+        # ---- 같은 마스크로 fxc = F(x) - E_M[F(cM)] ----
+        with torch.no_grad():
+            cM = time_mask * expanded_baselines + (1 - time_mask) * expanded_inputs   # [n,B,T,D]
+            f_cM = self.model(cM.view(-1, T, D), mask=None, timesteps=None, return_all=return_all)
+            if f_cM.dim() == 1:
+                f_cM = f_cM.unsqueeze(-1)
+            f_cM = f_cM.view(n_samples, B, -1).gather(
+                dim=2, index=targets.unsqueeze(0).unsqueeze(-1).expand(n_samples, B, 1)
+            ).squeeze(-1)                                                      # [n,B]
+            E_fcM = f_cM.mean(dim=0)                                          # [B]
+
+            f_x = self.model(inputs, mask=None, timesteps=None, return_all=return_all)
+            if f_x.dim() == 1:
+                f_x = f_x.unsqueeze(-1)
+            f_x = f_x.gather(dim=1, index=targets.view(B, 1)).squeeze(1)      # [B]
+            fxc = f_x - E_fcM
+
+        return attr_signed, fxc
+
     def attribute_orig(
         self,
         inputs: torch.Tensor,  # [B, T, D]
