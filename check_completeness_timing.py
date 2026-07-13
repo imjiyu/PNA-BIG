@@ -1,13 +1,34 @@
+"""
+TIMING completeness 검산.
+
+PNA-BIG는 check_completeness.py 로 sum(T_signed + R_signed) / (F(x)-F(c)) 를 잰다.
+이 스크립트는 '같은 방식'으로 TIMING을 잰다:
+
+    sum(A_TIMING_signed) / (F(x) - E_M[F(cM)])
+
+TIMING은 단일 map이라 T/R 분해가 없고, main_td.py의 `timing_comp` 블록이
+global-normalized signed attribution 과 fx(=F(x)-E_M[F(cM)]) 를 저장한다.
+
+필요 npy (results_pna/ 기본):
+    {data}_{model}_timing_comp_signed_{SEG}_result_{fold}_{seed}.npy
+    {data}_{model}_timing_comp_fxc_{SEG}_result_{fold}_{seed}.npy
+  SEG = seg{num_segments}_min{min_seg_len}_max{max_seg_len}
+
+실행:
+    python check_completeness_timing.py --results-dir ./results_pna
+"""
+
 import os
 import argparse
 import numpy as np
 
 
+# check_completeness.py 와 동일한 세그먼트 설정 (run_td_all.sh 기준)
 SEG_CONFIG = {
-    "boiler":   {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 48},
-    "epilepsy": {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 48},
-    "wafer":    {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 48},
-    "PAM":      {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 48},
+    "boiler":   {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 36},
+    "epilepsy": {"num_segments": 10, "min_seg_len": 10, "max_seg_len": 10},
+    "wafer":    {"num_segments": 5,  "min_seg_len": 10, "max_seg_len": 152},
+    "PAM":      {"num_segments": 10, "min_seg_len": 10, "max_seg_len": 600},
 }
 
 DATASETS = ["boiler", "epilepsy", "wafer", "PAM"]
@@ -15,19 +36,14 @@ DATASETS = ["boiler", "epilepsy", "wafer", "PAM"]
 
 def make_seg(data):
     cfg = SEG_CONFIG[data]
-    return (
-        f"kalman_seg{cfg['num_segments']}"
-        f"_min{cfg['min_seg_len']}"
-        f"_max{cfg['max_seg_len']}"
-    )
+    # 주의: TIMING comp key에는 'kalman' 접두어가 없다 (kalman smoother 미사용)
+    return f"seg{cfg['num_segments']}_min{cfg['min_seg_len']}_max{cfg['max_seg_len']}"
 
 
 def npy_path(results_dir, data, model, key, fold, seed):
-    lam_tag = "_lam10.0x10.0"
-
     return os.path.join(
         results_dir,
-        f"{data}_{model}_{key}{lam_tag}_result_{fold}_{seed}.npy"
+        f"{data}_{model}_{key}_result_{fold}_{seed}.npy"
     )
 
 
@@ -63,7 +79,6 @@ def subset_ratio_stats(ratio, fxc, keep_ratio):
 def completeness_stats(attr, fxc):
     eps = 1e-8
 
-    # sample별 sum(T+R)이 F(x)-F(c)와 맞는지 확인
     axes = tuple(range(1, attr.ndim))
     sum_attr = attr.sum(axis=axes)
     fxc = fxc.reshape(-1)
@@ -101,13 +116,10 @@ def fmt_pct(x):
 
 def mean_std(rows, key, as_pct=False):
     vals = np.array([r[key] for r in rows if r[key] is not None], dtype=float)
-
     if len(vals) == 0:
         return "N/A"
-
     if as_pct:
         return f"{vals.mean():.1%} ± {vals.std():.1%}"
-
     return f"{vals.mean():.4f} ± {vals.std():.4f}"
 
 
@@ -119,11 +131,10 @@ def check_dataset(data, model, seed, folds, results_dir):
 
     seg = make_seg(data)
 
-    trend_key = f"timing_td_trend_signed_{seg}"
-    resid_key = f"timing_td_residual_signed_{seg}"
-    fxc_key = f"timing_td_fxc_{seg}"
+    attr_key = f"timing_comp_signed_{seg}"
+    fxc_key = f"timing_comp_fxc_{seg}"
 
-    print(f"\n=== {data} / {seg} ===")
+    print(f"\n=== TIMING / {data} / {seg} ===")
     print(
         f"{'fold':<5}"
         f"{'all_med':>10}"
@@ -137,29 +148,20 @@ def check_dataset(data, model, seed, folds, results_dir):
     print("-" * 81)
 
     rows = []
-
     for fold in folds:
-        T = load_npy(results_dir, data, model, trend_key, fold, seed)
-        R = load_npy(results_dir, data, model, resid_key, fold, seed)
+        A = load_npy(results_dir, data, model, attr_key, fold, seed)
         fxc = load_npy(results_dir, data, model, fxc_key, fold, seed)
 
-        if T is None or R is None or fxc is None:
-            print(f"{fold:<5}  (npy 없음, 스킵)")
+        if A is None or fxc is None:
+            print(f"{fold:<5}  (npy 없음, 스킵)  기대: {npy_path(results_dir, data, model, attr_key, fold, seed)}")
             continue
 
-        if T.shape != R.shape:
-            print(f"{fold:<5}  (shape 불일치 T={T.shape} R={R.shape}, 스킵)")
-            continue
-
-        # completeness 검산 대상은 signed T + signed R
-        stats = completeness_stats(T + R, fxc)
-
+        stats = completeness_stats(A, fxc)
         if stats is None:
-            print(f"{fold:<5}  (표본 수 불일치, 스킵)")
+            print(f"{fold:<5}  (표본 수 불일치 A={A.shape} fxc={fxc.shape}, 스킵)")
             continue
 
         rows.append(stats)
-
         print(
             f"{fold:<5}"
             f"{fmt_float(stats['all_med']):>10}"
@@ -188,30 +190,24 @@ def check_dataset(data, model, seed, folds, results_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--data",
-        nargs="+",
-        default=DATASETS,
-        help="데이터셋 하나 또는 여러 개. 생략하면 전체 데이터셋 실행",
-    )
+    ap.add_argument("--data", nargs="+", default=DATASETS,
+                    help="데이터셋 하나 또는 여러 개. 생략하면 전체")
     ap.add_argument("--model", default="state")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--folds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
-    ap.add_argument("--results-dir", default="./results_pna_10x10", help="PNA-BIG attribution 결과 폴더",)
+    ap.add_argument("--results-dir", default="./results_pna",
+                    help="main_td.py 저장 폴더 (기본 results_pna)")
     args = ap.parse_args()
 
-    print("[검산] sum(T_signed + R_signed) / (F(x)-F(c))")
+    print("[TIMING 검산] sum(A_signed) / (F(x)-E_M[F(cM)])")
     print(f"       model={args.model}, seed={args.seed}, results_dir={args.results_dir}")
-    print("       all=전체 샘플, top75=|fxc| 상위 75%, top50=|fxc| 상위 50%")
+    print("       all=전체 샘플, top75/top50=|fxc| 상위 75/50%")
     print("       ratio는 1에 가까울수록 좋고, neg/norm_err는 0에 가까울수록 좋음")
 
     for data in args.data:
         check_dataset(
-            data=data,
-            model=args.model,
-            seed=args.seed,
-            folds=args.folds,
-            results_dir=args.results_dir,
+            data=data, model=args.model, seed=args.seed,
+            folds=args.folds, results_dir=args.results_dir,
         )
 
 
