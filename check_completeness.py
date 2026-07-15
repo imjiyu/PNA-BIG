@@ -2,6 +2,15 @@ import os
 import argparse
 import numpy as np
 
+PNA_HP = {
+    "PAM":      dict(ka=10, lam0=0.5,  lamf=3.0),
+    "boiler":   dict(ka=5,  lam0=10.0, lamf=3.0),
+    "epilepsy": dict(ka=10, lam0=10.0, lamf=1.0),
+    "wafer":    dict(ka=1,  lam0=0.5,  lamf=0.5),
+}
+def _lam_tag(data):
+    h = PNA_HP[data]
+    return f"_lam{h['lam0']}x{h['lamf']}"
 
 SEG_CONFIG = {
     "boiler":   {"num_segments": 50, "min_seg_len": 1,  "max_seg_len": 48},
@@ -23,7 +32,7 @@ def make_seg(data):
 
 
 def npy_path(results_dir, data, model, key, fold, seed):
-    lam_tag = "_lam10.0x10.0"
+    lam_tag = _lam_tag(data)
 
     return os.path.join(
         results_dir,

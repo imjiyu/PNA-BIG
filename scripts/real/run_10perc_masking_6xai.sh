@@ -54,7 +54,6 @@ for data in ${data_list}; do
                                 --explainers $explainer \
                                 --data $data \
                                 --fold $cv \
-                                --testbs 1 \
                                 --testbs 10 \
                                 --areas 0.1 \
                                 --lambda-1 $lambda_1 \

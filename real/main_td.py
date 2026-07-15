@@ -883,6 +883,7 @@ def main(
                         select_pna_indices(_xb, pna_cache, classifier, Ka=pna_ka).cpu()
                     )
                 _anchor_idx = th.cat(_idx_all, 0)          # [N, Ka]
+                os.makedirs("./results_pna", exist_ok=True)
                 _pool_p = f"./results_pna/{data}_{model_type}_pool_{fold}_{seed}.npy"
                 _idx_p  = (f"./results_pna/{data}_{model_type}_anchoridx_"
                            f"lam{pna_lam0}x{pna_lamf}_{fold}_{seed}.npy")
@@ -1182,18 +1183,9 @@ def main(
     )
 
 
-    if not os.path.exists("./results_our/"): ### 실험에 따라 폴더 바꾸기!! _our=(잠시timing), _pna=칼만스무더용 / _comp=fxc검산용 / _filter=칼만필터용 / _transformer=backbone실험용
-        os.makedirs("./results_our/")
+    SAVE_DIR = os.environ.get("SAVE_DIR", "./results_our")
+    os.makedirs(SAVE_DIR, exist_ok=True)
 
-    if not os.path.exists("./results_pna/"): ### 실험에 따라 폴더 바꾸기!! _our=(잠시timing), _pna=칼만스무더용 / _comp=fxc검산용 / _filter=칼만필터용 / _transformer=backbone실험용
-        os.makedirs("./results_pna/")
-
-    #for key in attr.keys():
-        #result = attr[key]
-        #if isinstance(result, tuple): result = result[0]
-        #np.save('./results_pna/{}_{}_{}_result_{}_{}.npy'.format(data, model_type, key, fold, seed), result.detach().cpu().numpy())
-    
-    #print(f"{explainers} done")
     tag = "" if eval_split == "test" else f"_{eval_split}"
     if baseline == "pna":
         tag += f"_lam{pna_lam0}x{pna_lamf}"
@@ -1203,10 +1195,10 @@ def main(
     for key in attr.keys():
         result = attr[key]
         if isinstance(result, tuple): result = result[0]
-        np.save('./results_our/{}_{}_{}{}_result_{}_{}.npy'.format(
-            data, model_type, key, tag, fold, seed), result.detach().cpu().numpy())
+        np.save('{}/{}_{}_{}{}_result_{}_{}.npy'.format(
+            SAVE_DIR, data, model_type, key, tag, fold, seed), result.detach().cpu().numpy())
 
-    print(f"{explainers} done")
+    print(f"{explainers} done → {SAVE_DIR}")
 
 
 def parse_args():

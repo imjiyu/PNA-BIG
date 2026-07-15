@@ -20,6 +20,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+PNA_HP = {
+    "PAM":      dict(ka=10, lam0=0.5,  lamf=3.0),
+    "boiler":   dict(ka=5,  lam0=10.0, lamf=3.0),
+    "epilepsy": dict(ka=10, lam0=10.0, lamf=1.0),
+    "wafer":    dict(ka=1,  lam0=0.5,  lamf=0.5),
+}
+def _lam_tag(data):
+    h = PNA_HP[data]
+    return f"_lam{h['lam0']}x{h['lamf']}"
 
 # ────────────────────────────────────────────────────────────────────
 # 데이터셋별 segment 설정 (npy 파일명 SEG 키 구성용) — README 값과 동일
@@ -49,7 +58,7 @@ def seg_key(cfg):
 
 
 def npy_path(results_dir, data, kind, fold, cfg, model_type, seed):
-    key = f"timing_td_{kind}_{seg_key(cfg)}_lam10.0x0.1"   # ← _lam tag 추가!
+    key = f"timing_td_{kind}_{seg_key(cfg)}{_lam_tag(data)}"   # ← _lam tag 추가!
     return Path(results_dir) / f"{data}_{model_type}_{key}_result_{fold}_{seed}.npy"
 
 

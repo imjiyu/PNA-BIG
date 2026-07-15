@@ -158,38 +158,75 @@ def fills_for_ref(ref, x_test, anchors_dict, args):
     raise ValueError(ref)
 
 
-def eval_setting(classifier, x_test, attr, fills, args, mask_test, timesteps, device):
+def eval_setting(
+    classifier,
+    x_test,
+    attr,
+    fills,
+    args,
+    mask_test,
+    timesteps,
+    device,
+):
     cds, auccs, c50s = [], [], []
-    ex = {"acc": [], "comp": [], "ce": [], "lodds": [], "suff": []}
+    ex = {
+        "acc": [],
+        "comp": [],
+        "ce": [],
+        "lodds": [],
+        "suff": [],
+    }
+
     for b in fills:
-        b_dev = b.to(device) if isinstance(b, th.Tensor) else b  # per-anchor 만 GPU 로
+        b_dev = b.to(device) if isinstance(b, th.Tensor) else b
+
         cum_diff, AUCC, cum_50_diff, _ = cumulative_difference(
-            classifier, x_test, attributions=attr, baselines=b_dev,
-            topk=args.topk, top=args.top, testbs=args.testbs, largest=True,
+            classifier,
+            x_test,
+            attributions=attr,
+            baselines=b_dev,
+            topk=args.topk,
+            top=args.top,
+            testbs=args.testbs,
+            largest=True,
             additional_forward_args=(mask_test, timesteps, False),
         )
-        cds.append(float(cum_diff)); auccs.append(float(AUCC)); c50s.append(float(cum_50_diff))
 
-        e = compute_extra_metrics(classifier, x_test, mask_test, timesteps,
-                                  attr, b_dev, args.topk, args.testbs, device)
-        for k in ex:
-            ex[k].append(e[k])
-        del b_dev
-    m = lambda L: float(np.mean(L))
-    return m(cds), m(auccs), m(c50s), {k: m(v) for k, v in ex.items()}
+        cds.append(float(cum_diff))
+        auccs.append(float(AUCC))
+        c50s.append(float(cum_50_diff))
 
         if not args.cpd_only:
-            e = compute_extra_metrics(classifier, x_test, mask_test, timesteps, attr, b_dev, args.topk, args.testbs, device)
+            e = compute_extra_metrics(
+                classifier,
+                x_test,
+                mask_test,
+                timesteps,
+                attr,
+                b_dev,
+                args.topk,
+                args.testbs,
+                device,
+            )
+
             for k in ex:
                 ex[k].append(e[k])
+
         del b_dev
-    m = lambda L: float(np.mean(L))
+
+    mean_value = lambda values: float(np.mean(values))
+
     if args.cpd_only:
         extras = {k: float("nan") for k in ex}
     else:
-        extras = {k: m(v) for k, v in ex.items()}
-    return m(cds), m(auccs), m(c50s), extras
+        extras = {k: mean_value(v) for k, v in ex.items()}
 
+    return (
+        mean_value(cds),
+        mean_value(auccs),
+        mean_value(c50s),
+        extras,
+    )
 
 
 def main():

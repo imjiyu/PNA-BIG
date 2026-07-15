@@ -801,7 +801,7 @@ def main(
             our_results.append(attr_batch.detach().cpu())
 
         # attr["timeig_sample50_seg25_min7_max30"] = th.cat(our_results, dim=0)
-        attr[f"timing_sample50_seg{num_segments}_min{min_seg_len}_max{max_seg_len}"] = th.cat(our_results, dim=0)
+        attr[f"timing_sample100_seg{num_segments}_min{min_seg_len}_max{max_seg_len}"] = th.cat(our_results, dim=0)
 
     if "our_signed" in explainers:
         from attribution.explainers import OUR
@@ -841,7 +841,7 @@ def main(
             our_results.append(attr_batch.detach().cpu())
 
         # attr["timeig_sample50_seg25_min7_max30"] = th.cat(our_results, dim=0)
-        attr[f"timing_sample50_seg{num_segments}_min{min_seg_len}_max{max_seg_len}_signed"] = th.cat(our_results, dim=0)
+        attr[f"timing_sample10_seg{num_segments}_min{min_seg_len}_max{max_seg_len}_signed"] = th.cat(our_results, dim=0)
 
 
     if "our_random" in explainers:

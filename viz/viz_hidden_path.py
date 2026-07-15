@@ -3,7 +3,7 @@ viz_hidden_path.py
 
 목적: baseline -> input path 를 따라가며 hidden state trajectory 를 뽑아,
       zero baseline vs PNA anchor 중 어느 쪽이 training manifold 안에 머무는지를 보인다.
-      (= supervisor 요청 "visualize OOD mitigation")
+      ("visualize OOD mitigation")
 
 설계:
   - hidden = classifier.net.regressor 직전 representation (pna.py hook 과 동일 지점)
@@ -52,8 +52,6 @@ from datasets.wafer import Wafer
 from attribution.pna import build_pna_cache, select_pna_baselines
 from attribution.explainers_pna import compute_trend_kalman
 
-
-# freezer 제외 (연구에서 미사용)
 CFG = {
     "PAM":      (PAM,      17, 8, 600, False),
     "boiler":   (Boiler,   20, 2, 36,  False),
