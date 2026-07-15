@@ -3,9 +3,6 @@
 **Projected Neutral Anchor Baseline for Bifurcated Integrated Gradients**
 *In-Manifold, Decision-Neutral Baselines for Time-Series Attribution*
 
-Jiyu Lim, Jisu Yeo, Haksoo Lim, Jaesik Choi (KAIST Kim Jaechul Graduate School of AI)
-Built on [TIMING (Jang et al., 2025)](https://arxiv.org/abs/2506.05035).
-
 ---
 
 ## 1. Overview
