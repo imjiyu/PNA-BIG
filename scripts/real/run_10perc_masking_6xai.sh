@@ -55,6 +55,7 @@ for data in ${data_list}; do
                                 --data $data \
                                 --fold $cv \
                                 --testbs 1 \
+                                --testbs 10 \
                                 --areas 0.1 \
                                 --lambda-1 $lambda_1 \
                                 --lambda-2 $lambda_2 \

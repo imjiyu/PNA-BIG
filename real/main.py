@@ -307,7 +307,7 @@ def main(
                 save_dir=".",
                 version=random.getrandbits(128),
             ),
-            # precision=16, # if OOM occurs
+            precision=16, # if OOM occurs
         )
         mask = GateMaskNet(
             forward_func=classifier.predict,

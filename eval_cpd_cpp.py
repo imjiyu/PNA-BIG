@@ -169,6 +169,7 @@ def eval_setting(classifier, x_test, attr, fills, args, mask_test, timesteps, de
             additional_forward_args=(mask_test, timesteps, False),
         )
         cds.append(float(cum_diff)); auccs.append(float(AUCC)); c50s.append(float(cum_50_diff))
+
         e = compute_extra_metrics(classifier, x_test, mask_test, timesteps,
                                   attr, b_dev, args.topk, args.testbs, device)
         for k in ex:
@@ -176,6 +177,19 @@ def eval_setting(classifier, x_test, attr, fills, args, mask_test, timesteps, de
         del b_dev
     m = lambda L: float(np.mean(L))
     return m(cds), m(auccs), m(c50s), {k: m(v) for k, v in ex.items()}
+
+        if not args.cpd_only:
+            e = compute_extra_metrics(classifier, x_test, mask_test, timesteps, attr, b_dev, args.topk, args.testbs, device)
+            for k in ex:
+                ex[k].append(e[k])
+        del b_dev
+    m = lambda L: float(np.mean(L))
+    if args.cpd_only:
+        extras = {k: float("nan") for k in ex}
+    else:
+        extras = {k: m(v) for k, v in ex.items()}
+    return m(cds), m(auccs), m(c50s), extras
+
 
 
 def main():
@@ -207,6 +221,12 @@ def main():
                    help="생성 때 저장한 pool/anchoridx 디렉토리. 주면 로드 경로 우선.")
     p.add_argument("--verify_anchors", action="store_true",
                    help="로드본 vs 재도출본 bit-identical assert (증명용)")
+
+    p.add_argument(
+        "--cpd_only",
+        action="store_true",
+        help="CPD 계열만 계산하고 acc/comp/ce/log-odds/sufficiency는 생략",
+        )
 
     p.add_argument("--methods", nargs="+", required=True)
     args = p.parse_args()

@@ -20,3 +20,7 @@ viz_hidden_*/
 .DS_Store
 *.swp
 data/PAM/processed_data/PTdict_list.npy
+
+# Generated data files
+*.csv
+*.npy

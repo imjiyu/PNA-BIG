@@ -1181,8 +1181,13 @@ def main(
         .repeat(data_len, 1)
     )
 
+
     if not os.path.exists("./results_our/"): ### 실험에 따라 폴더 바꾸기!! _our=(잠시timing), _pna=칼만스무더용 / _comp=fxc검산용 / _filter=칼만필터용 / _transformer=backbone실험용
         os.makedirs("./results_our/")
+
+    if not os.path.exists("./results_pna/"): ### 실험에 따라 폴더 바꾸기!! _our=(잠시timing), _pna=칼만스무더용 / _comp=fxc검산용 / _filter=칼만필터용 / _transformer=backbone실험용
+        os.makedirs("./results_pna/")
+
     #for key in attr.keys():
         #result = attr[key]
         #if isinstance(result, tuple): result = result[0]
