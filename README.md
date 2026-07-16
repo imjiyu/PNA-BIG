@@ -52,7 +52,7 @@ pip install -r requirement.txt
 
 ## 3. 하이퍼파라미터 — 이미 결정되어 있다
 
-**튜닝은 다시 할 필요 없다.** 데이터셋별 최적값이 `hp_pna.sh`에 들어 있고, 모든 스크립트가 이 파일만 읽는다.
+**튜닝은 다시 할 필요 없다.** 데이터셋별 최적값이 `hp_pna.sh`에 들어 있고, 모든 bash 스크립트가 이 파일만 읽는다.
 (튜닝 과정을 재현하고 싶으면 → [부록 A](#부록-a-하이퍼파라미터-튜닝-재현-선택))
 
 | dataset  | λ0   | λf  | Ka | TIMING npy 이름 |
@@ -99,7 +99,8 @@ bash run_all.sh baseattr    # Step 3b-1 : baseline 6종 attribution + zero/avg C
 bash run_all.sh cpd         # Step 3a   : PNA-BIG CPD (zero/average/pna)
 bash run_all.sh baselines   # Step 3b-2 : baseline 7종 CPD (pna fill)
 bash run_all.sh dominance   # Step 3c   : Trend vs Residual
-bash run_all.sh tables      # Step 4    : 표 생성
+bash run_all.sh domtables   # Step 4a   : Trend vs Residual 표만 (mask_ref 3종)
+bash run_all.sh tables      # Step 4    : 표 전체 (4a + 8-method 통합)
 ```
 
 **환경변수**
@@ -206,6 +207,9 @@ grep -h "max|loaded" logs/eval_dom/*.log | sort -u    # → 전부 0.0 이어야
 > `TR_table.py` 는 반드시 `--mask_ref` 로 **하나만 골라서** 집계해야 한다 (안 그러면 3종이 한 평균으로 뭉개짐).
 
 ### Step 4 — 표 생성
+
+`tables` 는 4a(Trend vs Residual 표) + 4b/4c(8-method CPD 통합)를 전부 돈다.
+TR 표만 필요하면 `domtables` 로 4a만 돌린다 — `eval_anchor/` CSV가 없어도 동작한다.
 
 ```
 results_pna_hpt/eval_dominance/{zero,average,pna}/
