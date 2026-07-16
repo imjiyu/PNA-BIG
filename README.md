@@ -194,7 +194,7 @@ zero/average는 Step 3b-1에 이미 있으므로 여기선 `--mask_refs pna`만 
 
 ### Step 3c — Trend vs Residual
 
-`timing_td_trend_*` vs `timing_td_residual_*`을 zero-masking으로 평가 (dominance 표용).
+`timing_td_trend_*` vs `timing_td_residual_*`을 평가 (dominance 표용).
 
 ### Step 4 — 표 생성
 
