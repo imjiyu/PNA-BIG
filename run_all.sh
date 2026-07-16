@@ -171,39 +171,46 @@ stage_baselines() {
 # -----------------------------------------------------------------------------
 # Step 3c — Trend vs Residual dominance
 # -----------------------------------------------------------------------------
+
 stage_dominance() {
   hdr "Step 3c: Trend vs Residual → ${DOM_DIR}/"
   rm -f "${DOM_DIR}"/*.csv
   for d in $DATASETS; do
+    S="${SEG}_lam${L0[$d]}x${LF[$d]}"
     for f in $FOLDS; do
       gpu=$(gpu_for "$f")
-      S="${SEG}_lam${L0[$d]}x${LF[$d]}"
-      CUDA_VISIBLE_DEVICES="$gpu" \
+      CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1 \
         nohup python eval_cpd_cpp.py \
-          --mask_refs zero average pna \
           --data "$d" --fold "$f" --device cuda:0 \
-          --testbs 200 \ 
+          --mask_refs zero average pna \
+          --testbs 200 \
           --pna_lam0 "${L0[$d]}" --pna_lamf "${LF[$d]}" --pna_ka "${KA[$d]}" \
           --anchor_idx_dir "$ANCHOR_DIR" --verify_anchors --anchor_chunk 200 \
           --npy_dir "$ATTR_DIR" \
-          --output_file "${DOM_DIR}/full_${d}_f${f}.csv" \
           --methods "timing_td_trend_${S}" "timing_td_residual_${S}" \
+          --output_file "${DOM_DIR}/full_${d}_f${f}.csv" \
           > "logs/eval_dom/${d}_f${f}.log" 2>&1 &
     done
     wait
   done
   awk 'FNR==1 && NR!=1 {next} {print}' "${DOM_DIR}"/full_*.csv > "${DOM_DIR}/full_eval.csv"
   echo "[MERGED] ${DOM_DIR}/full_eval.csv"
+
+  hdr "anchor 재현 검증 (전부 0.0 이어야 정상)"
+  grep -h "max|loaded" logs/eval_dom/*.log | sort -u
 }
 
 # -----------------------------------------------------------------------------
 # Step 4 — 표 생성
 # -----------------------------------------------------------------------------
 stage_tables() {
-  hdr "Step 4a: Trend vs Residual 표"
-  python TR_table.py --results_dir "$ATTR_DIR" \
-    --eval_csv "${DOM_DIR}/full_eval.csv" \
-    --out_dir "$DOM_DIR" --folds 0 1 2 3 4
+  hdr "Step 4a: Trend vs Residual 표 (mask_ref 3종)"
+  for ref in zero average pna; do
+    python TR_table.py --results_dir "$ATTR_DIR" \
+      --eval_csv "${DOM_DIR}/full_eval.csv" \
+      --mask_ref "$ref" \
+      --out_dir "${DOM_DIR}/${ref}" --folds 0 1 2 3 4
+  done
 
   hdr "Step 4b: 8-method CPD 통합 (raw)"
   awk 'FNR==1 && NR!=1 {next} {print}' \
