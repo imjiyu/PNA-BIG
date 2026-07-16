@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# sweep_hpt.sh
+# sweep_hpo.sh
 #   PNA-BIG lambda 하이퍼파라미터 튜닝 (5-fold validation).
 #
 #   [1] 모든 (dataset x combo x fold) 에 대해 attribution 을 새로 생성 (val split)
