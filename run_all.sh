@@ -203,14 +203,20 @@ stage_dominance() {
 # -----------------------------------------------------------------------------
 # Step 4 — 표 생성
 # -----------------------------------------------------------------------------
-stage_tables() {
+
+# Step 4a — Trend vs Residual 표만 (mask_ref 3종)
+stage_domtables() {
   hdr "Step 4a: Trend vs Residual 표 (mask_ref 3종)"
   for ref in zero average pna; do
     python TR_table.py --results_dir "$ATTR_DIR" \
       --eval_csv "${DOM_DIR}/full_eval.csv" \
       --mask_ref "$ref" \
-      --out_dir "${DOM_DIR}/${ref}" --folds 0 1 2 3 4
+      --out_dir "${DOM_DIR}/${ref}" --folds $FOLDS
   done
+}
+
+stage_tables() {
+  stage_domtables
 
   hdr "Step 4b: 8-method CPD 통합 (raw)"
   awk 'FNR==1 && NR!=1 {next} {print}' \
@@ -232,10 +238,11 @@ case "${1:-all}" in
   cpd)        stage_cpd ;;
   baselines)  stage_baselines ;;
   dominance)  stage_dominance ;;
+  domtables)  stage_domtables ;;
   tables)     stage_tables ;;
   all)        stage_attr; stage_comp; stage_baseattr; stage_cpd
               stage_baselines; stage_dominance; stage_tables ;;
-  *)          echo "usage: bash run_all.sh {all|attr|comp|baseattr|cpd|baselines|dominance|tables}"; exit 1 ;;
+  *)  echo "usage: bash run_all.sh {all|attr|comp|baseattr|cpd|baselines|dominance|domtables|tables}"; exit 1 ;;
 esac
 
 hdr "DONE: $1"
