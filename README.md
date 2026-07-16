@@ -83,7 +83,7 @@ pip install -r requirement.txt
 
 ```bash
 conda activate timing
-cd ~/TIMING-main/PNA-BIG
+cd ~/TIMING-main/PNA-BIG-XAI
 
 tmux new -s pna
 GPUS="1 2 3 4 5" bash run_all.sh all 2>&1 | tee logs/run_all.log
@@ -125,7 +125,7 @@ Step 3b-1 baseline attr      → results_our/*.npy  +  state_{data}_{fold}_0_res
 Step 3a   PNA-BIG CPD        → results_pna_hpt/eval_anchor/{data}.csv
 Step 3b-2 baseline CPD       → results_pna_hpt/eval_anchor/{data}_baselines_pna.csv
 Step 3c   Trend vs Residual  → results_pna_hpt/eval_dominance/full_eval.csv
-Step 4    표                 → aggregated_results/ , results_pna_hpt/eval_dominance/
+Step 4    표                 → aggregated_results/ , results_pna_hpt/eval_dominance/{zero,average,pna}/
 ```
 
 ### Step 1 — Attribution 생성
@@ -194,12 +194,23 @@ zero/average는 Step 3b-1에 이미 있으므로 여기선 `--mask_refs pna`만 
 
 ### Step 3c — Trend vs Residual
 
-`timing_td_trend_*` vs `timing_td_residual_*`을 평가 (dominance 표용).
+`timing_td_trend_*` vs `timing_td_residual_*` 을 Step 3a와 동일하게
+`--mask_refs zero average pna` 로 평가한다 (dominance 표용).
+λ0/λf/Ka 는 `hp_pna.sh` 값이 그대로 들어가며, `--verify_anchors` 로 Step 1 anchor와 일치를 검증한다.
+
+```bash
+grep -h "max|loaded" logs/eval_dom/*.log | sort -u    # → 전부 0.0 이어야 정상
+```
+
+> `full_eval.csv` 에는 mask_ref 3종 × 5 fold 행이 함께 들어 있다.
+> `TR_table.py` 는 반드시 `--mask_ref` 로 **하나만 골라서** 집계해야 한다 (안 그러면 3종이 한 평균으로 뭉개짐).
 
 ### Step 4 — 표 생성
 
 ```
-results_pna_hpt/eval_dominance/     # Trend vs Residual 표 (TR_table.py)
+results_pna_hpt/eval_dominance/{zero,average,pna}/
+  result_table3.csv       # 논문 Table 3 형태 (Ratio / Dominant / CPD±std / 나머지)
+  result_TR_raw.csv, result_TR.csv, result_TR_perfold.csv
 results_pna_hpt/eval_anchor/all_8methods.csv
 aggregated_results/
   cpd_table.csv / cpd_table.html    # mask_ref × 8 method × 4 dataset CPD 표
