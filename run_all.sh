@@ -169,7 +169,7 @@ stage_baselines() {
 }
 
 # -----------------------------------------------------------------------------
-# Step 3c — Trend vs Residual dominance (zero fill)
+# Step 3c — Trend vs Residual dominance
 # -----------------------------------------------------------------------------
 stage_dominance() {
   hdr "Step 3c: Trend vs Residual → ${DOM_DIR}/"
@@ -180,6 +180,7 @@ stage_dominance() {
       S="${SEG}_lam${L0[$d]}x${LF[$d]}"
       CUDA_VISIBLE_DEVICES="$gpu" \
         nohup python eval_cpd_cpp.py \
+          --mask_refs zero average pna \
           --data "$d" --fold "$f" --device cuda:0 \
           --npy_dir "$ATTR_DIR" \
           --output_file "${DOM_DIR}/full_${d}_f${f}.csv" \
