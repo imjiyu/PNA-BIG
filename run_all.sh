@@ -182,6 +182,9 @@ stage_dominance() {
         nohup python eval_cpd_cpp.py \
           --mask_refs zero average pna \
           --data "$d" --fold "$f" --device cuda:0 \
+          --testbs 200 \ 
+          --pna_lam0 "${L0[$d]}" --pna_lamf "${LF[$d]}" --pna_ka "${KA[$d]}" \
+          --anchor_idx_dir "$ANCHOR_DIR" --verify_anchors --anchor_chunk 200 \
           --npy_dir "$ATTR_DIR" \
           --output_file "${DOM_DIR}/full_${d}_f${f}.csv" \
           --methods "timing_td_trend_${S}" "timing_td_residual_${S}" \
