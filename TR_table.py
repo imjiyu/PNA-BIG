@@ -142,12 +142,16 @@ def extract_tr(method_str):
     return "Unknown"
 
 
-def aggregate_metrics(eval_csv):
+def aggregate_metrics(eval_csv, mask_ref=None):
     """
     (data, TR) 별로 CPD(cum_diff) 및 나머지 metric 의 fold 평균/표준편차 반환.
     반환: dict[(data, TR)] -> dict(metric -> (mean, std))
     """
     df = pd.read_csv(eval_csv)
+    if mask_ref is not None:
+        df = df[df["mask_ref"] == mask_ref].copy()
+        if len(df) == 0:
+            raise ValueError(f"mask_ref={mask_ref} 행 없음")
     df["TR"] = df["method"].apply(extract_tr)
     cpd = df[df["metric"] == "CPD"].copy()
 
@@ -175,7 +179,7 @@ def aggregate_metrics(eval_csv):
 # 3. 조립
 # ────────────────────────────────────────────────────────────────────
 def build(args):
-    metrics, dataset_order = aggregate_metrics(args.eval_csv)
+    metrics, dataset_order = aggregate_metrics(args.eval_csv, args.mask_ref)
     folds = [int(x) for x in args.folds]
 
     raw_rows = []     # 전체 mean/std 롱포맷
@@ -299,6 +303,7 @@ def main():
     p.add_argument("--model_type", default="state")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--folds", nargs="+", default=["0", "1", "2", "3", "4"])
+    p.add_argument("--mask_ref", default="pna", choices=["zero","average","pna","na"])
     args = p.parse_args()
     build(args)
 
