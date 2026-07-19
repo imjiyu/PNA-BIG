@@ -57,7 +57,8 @@ from real.cumulative_difference import cumulative_difference
 from tint.models import MLP, RNN
 
 from real.classifier import MimicClassifierNet
-
+from models.vae import TimeSeriesVAE
+from attribution.magig import MAGIG
 
 def main(
     explainers: List[str],
@@ -1012,6 +1013,59 @@ def main(
         attr[f"timing_comp_signed_{SEG}"] = th.cat(comp_results, dim=0)
         attr[f"timing_comp_fxc_{SEG}"]    = th.cat(fxc_results, dim=0)
     ###
+
+    if "magig" in explainers:
+
+        vae_ckpt_path = f"./model/{data}/vae_{fold}_{seed}.pt"
+        ckpt = th.load(vae_ckpt_path, map_location=device)
+        vae = TimeSeriesVAE(**ckpt["config"]).to(device)
+        vae.load_state_dict(ckpt["model_state"])
+        vae.eval()
+        print("VAE 로드 완료!")
+
+        explainer = MAGIG(
+            classifier=classifier,
+            vae=vae,
+            device=device,
+        )
+
+        # [TODO] GP 기반 attritution 되어 있는 것을 MAGIG의 Guided IG 형태로 변경
+        from captum._utils.common import _run_forward
+        results = []
+        results_signed = []   # 추가
+        results_unc = []
+        # residual_sum = 0.0   # 분자 누적 (|attr_sum - df|)
+        # df_sum = 0.0           # 분모 누적 (|df|)
+        # n_total = 0
+
+        rough_num_total = 0.0
+        rough_den_total = 0.0
+
+        for x_batch, mask_batch in test_loader:
+            x_batch = x_batch.to(device)
+            mask_batch = mask_batch.to(device)
+
+            with th.no_grad():
+                preds = _run_forward(
+                    classifier, x_batch,
+                    additional_forward_args=(mask_batch, None, False),
+                )
+            target = th.argmax(preds, dim=-1)
+
+            attr_batch, unc_batch = explainer.attribute(
+                inputs=x_batch,
+                baselines=th.zeros_like(x_batch),
+                targets=target,
+                additional_forward_args=(mask_batch, None, False),
+                n_steps=50,
+                return_uncertainty=True,
+                normalize=False,
+            )
+            results.append(attr_batch.abs().detach().cpu())
+            results_signed.append(attr_batch.detach().cpu())   # 추가 (raw signed)
+            results_unc.append(unc_batch.detach().cpu())
+            print("test")
+
 
     if "our_signed" in explainers:
         from attribution.explainers import OUR
